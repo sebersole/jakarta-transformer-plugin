@@ -4,11 +4,9 @@ import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.file.RegularFile;
 import org.gradle.api.plugins.JavaLibraryPlugin;
 import org.gradle.api.plugins.JavaPlugin;
 import org.gradle.api.plugins.JavaPluginExtension;
-import org.gradle.api.provider.Provider;
 import org.gradle.api.publish.Publication;
 import org.gradle.api.publish.PublicationContainer;
 import org.gradle.api.publish.PublishingExtension;
@@ -97,15 +95,13 @@ public class LocalProjectShadowSpec implements ShadowSpec {
 
 		final SourceSet sourceMainSourceSet = Helper.extractSourceSets( sourceProject ).getByName( "main" );
 
-		final ShadowPublishArtifact shadowPublishArtifact = createArtifactTransformationTask(
+		final FileTransformationTask shadowPublishArtifact = createArtifactTransformationTask(
 				"shadowJar",
 				targetJarTask,
 				(Jar) sourceProject.getTasks().getByName( sourceMainSourceSet.getJarTaskName() ),
-				null,
 				transformerConfig,
 				targetProject
 		);
-		targetJarTask.dependsOn( shadowPublishArtifact );
 
 		final PublishingExtension sourcePublishingExtension = (PublishingExtension) sourceProject.getExtensions().findByName( "publishing" );
 		if ( sourcePublishingExtension != null ) {
@@ -123,10 +119,11 @@ public class LocalProjectShadowSpec implements ShadowSpec {
 				// shadowMavenPublication.artifact( shadowPublishArtifact );
 				// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 				shadowMavenPublication.artifact(
-						shadowPublishArtifact.getFile(),
+						shadowPublishArtifact.getOutput(),
 						(mavenArtifact) -> {
-							mavenArtifact.setClassifier( shadowPublishArtifact.getClassifier() );
-							mavenArtifact.setExtension( shadowPublishArtifact.getExtension() );
+							mavenArtifact.setClassifier( null );
+							mavenArtifact.setExtension( "jar" );
+							mavenArtifact.builtBy(shadowPublishArtifact);
 						}
 				);
 
@@ -214,11 +211,10 @@ public class LocalProjectShadowSpec implements ShadowSpec {
 
 	}
 
-	private ShadowPublishArtifact createArtifactTransformationTask(
+	private FileTransformationTask createArtifactTransformationTask(
 			String taskName,
 			Jar jarTask,
 			Jar sourceJarTask,
-			String classifier,
 			TransformerConfig transformerConfig,
 			Project targetProject) {
 		final FileTransformationTask transformJarTask = targetProject.getTasks().create(
@@ -226,21 +222,13 @@ public class LocalProjectShadowSpec implements ShadowSpec {
 				FileTransformationTask.class,
 				transformerConfig
 		);
-		transformJarTask.dependsOn( jarTask );
+		transformJarTask.dependsOn( sourceJarTask );
 		groupingTask.dependsOn( transformJarTask );
 
-		final Provider<RegularFile> sourceProjectJarFileAccess = sourceJarTask.getArchiveFile();
-		transformJarTask.getSource().set( sourceProjectJarFileAccess );
+		transformJarTask.getSource().set(sourceJarTask.getArchiveFile());
 		transformJarTask.getOutput().convention( jarTask.getArchiveFile() );
 
-		final ShadowPublishArtifact publishArtifact = new ShadowPublishArtifact(
-				targetProject.getName(),
-				classifier,
-				transformJarTask,
-				transformerConfig
-		);
-
-		return publishArtifact;
+		return transformJarTask;
 	}
 
 	@Override
@@ -299,26 +287,32 @@ public class LocalProjectShadowSpec implements ShadowSpec {
 
 		final SourceSetContainer targetSourceSets = Helper.extractSourceSets( targetProject );
 		final Jar targetProjectJarTask = (Jar) targetProject.getTasks().getByName( targetSourceSets.getByName( "main" ).getSourcesJarTaskName() );
+		targetProjectJarTask.setEnabled( false );
 
-		final ShadowPublishArtifact transformationArtifact = createArtifactTransformationTask(
+		final FileTransformationTask transformationArtifact = createArtifactTransformationTask(
 				"shadowSourcesJar",
 				targetProjectJarTask,
 				sourceProjectJarTask,
-				"sources",
 				transformerConfig,
 				targetProject
 		);
 
 		if ( shadowMavenPublication != null ) {
 			shadowMavenPublication.artifact(
-					transformationArtifact.getFile(),
-					(mavenArtifact) -> mavenArtifact.setClassifier( transformationArtifact.getClassifier() )
+					transformationArtifact.getOutput(),
+					(mavenArtifact) -> {
+						mavenArtifact.setClassifier("sources");
+						mavenArtifact.builtBy(transformationArtifact);
+					}
 			);
 		}
 		if ( shadowIvyPublication != null ) {
 			shadowIvyPublication.artifact(
-					transformationArtifact.getFile(),
-					(ivyArtifact) -> ivyArtifact.setClassifier( transformationArtifact.getClassifier() )
+					transformationArtifact.getOutput(),
+					(ivyArtifact) -> {
+						ivyArtifact.setClassifier("sources");
+						ivyArtifact.builtBy(transformationArtifact);
+					}
 			);
 		}
 	}
@@ -336,26 +330,32 @@ public class LocalProjectShadowSpec implements ShadowSpec {
 
 		final SourceSetContainer targetSourceSets = Helper.extractSourceSets( targetProject );
 		final Jar targetProjectJarTask = (Jar) targetProject.getTasks().getByName( targetSourceSets.getByName( "main" ).getJavadocJarTaskName() );
+		targetProjectJarTask.setEnabled( false );
 
-		final ShadowPublishArtifact transformationArtifact = createArtifactTransformationTask(
+		final FileTransformationTask transformationArtifact = createArtifactTransformationTask(
 				"shadowJavadocJar",
 				targetProjectJarTask,
 				sourceProjectJarTask,
-				"javadoc",
 				transformerConfig,
 				targetProject
 		);
 
 		if ( shadowMavenPublication != null ) {
 			shadowMavenPublication.artifact(
-					transformationArtifact.getFile(),
-					(mavenArtifact) -> mavenArtifact.setClassifier( transformationArtifact.getClassifier() )
+					transformationArtifact.getOutput(),
+					(mavenArtifact) -> {
+						mavenArtifact.setClassifier("javadoc");
+						mavenArtifact.builtBy(transformationArtifact);
+					}
 			);
 		}
 		if ( shadowIvyPublication != null ) {
 			shadowIvyPublication.artifact(
-					transformationArtifact.getFile(),
-					(ivyArtifact) -> ivyArtifact.setClassifier( transformationArtifact.getClassifier() )
+					transformationArtifact.getOutput(),
+					(ivyArtifact) -> {
+						ivyArtifact.setClassifier("javadoc");
+						ivyArtifact.builtBy(transformationArtifact);
+					}
 			);
 		}
 	}
